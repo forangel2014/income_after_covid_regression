@@ -1,6 +1,3 @@
-from cgi import test
-from re import S
-from scipy import optimize
 import torch
 import pandas as pd
 import numpy as np
@@ -82,7 +79,7 @@ def one_hot(x, max_cls=10):
     return np.array(one_hot_x)
 
 def main():
-    path = './hanhan/data.xlsx'
+    path = 'data.xlsx'
     data = pd.read_excel(path)
     flag = [int('.f' in col_name) for col_name in data.columns][:-2]
     is_discrete_feat = np.argwhere(np.array(flag) > 0).reshape(-1)
