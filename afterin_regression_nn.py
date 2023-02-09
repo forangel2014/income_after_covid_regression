@@ -1,3 +1,4 @@
+from cProfile import label
 import torch
 import pandas as pd
 import numpy as np
@@ -69,7 +70,9 @@ def test(mlp, test_loader):
         y_pred = mlp(x).reshape(-1)
         se += torch.sum((y-y_pred)**2)
     mse = se/len(test_loader.dataset)
-    print("MSE = {}".format(float(mse)))
+    mse = float(mse)
+    print("MSE = {}".format(mse))
+    return mse
 
 def normalize(x):
     mu = np.mean(x, axis=0)
@@ -109,13 +112,15 @@ def MIV(mlp, train_loader, feat_name, delta=0.1):
     miv = sorted(miv.items(), key=lambda x: x[1], reverse=True)
     return miv
 
-def plot(loss):
+def plot(train_loss, test_loss):
     plt.figure()
     plt.xlabel('epoch')
     plt.ylabel('loss')
-    plt.plot(loss)
+    plt.plot(train_loss, 'r', label='train')
+    plt.plot(test_loss, 'b', label='test')
+    plt.legend()
     plt.show()
-    plt.savefig('train_loss.jpg')
+    plt.savefig('loss.jpg')
 
 def main():
     path = 'data.xlsx'
@@ -153,14 +158,16 @@ def main():
     optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
     
     train_loss = []
+    test_loss = []
     for e in range(1000):
         loss = train(mlp, train_loader, optimizer)
         train_loss.extend(loss)
-        if e % 10 == 0:
+        if e % 1 == 0:
             print('*'*10 + 'test at epoch {}'.format(e) + '*'*10)
-            test(mlp, test_loader)
-    
-    plot(train_loss)
+            loss = test(mlp, test_loader)
+            test_loss.append(loss)
+            
+    plot(train_loss, test_loss)
     print(MIV(mlp, train_loader, feat_name))
     
 if __name__ == "__main__":
