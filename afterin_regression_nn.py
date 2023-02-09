@@ -1,6 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
+import copy
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
 
@@ -37,10 +38,10 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         data = self.data[idx]
-        x = data[:-2]
-        y_base = data[-2]
+        x = data[:-1]
+        #y_base = data[-2]
         y = data[-1]
-        return x, y_base, y
+        return x, y
 
 def split(x, ratio=0.1):
     n_sample = x.shape[0]
@@ -51,8 +52,8 @@ def split(x, ratio=0.1):
     return train_sample, test_sample
 
 def train(mlp, train_loader, optimizer):
-    for x, y_base, y in iter(train_loader):
-        y_pred = mlp(x).reshape(-1) + y_base
+    for x, y in iter(train_loader):
+        y_pred = mlp(x).reshape(-1)
         loss = torch.mean((y-y_pred)**2)
         optimizer.zero_grad()
         loss.backward()
@@ -61,8 +62,8 @@ def train(mlp, train_loader, optimizer):
 
 def test(mlp, test_loader):
     se = 0
-    for x, y_base, y in iter(test_loader):
-        y_pred = mlp(x).reshape(-1) + y_base
+    for x, y in iter(test_loader):
+        y_pred = mlp(x).reshape(-1)
         se += torch.sum((y-y_pred)**2)
     mse = se/len(test_loader.dataset)
     print("MSE = {}".format(float(mse)))
@@ -72,29 +73,60 @@ def normalize(x):
     std = np.clip(np.std(x, axis=0), 1e-5, 1e5)
     return (x-mu)/std        
 
-def one_hot(x, max_cls=10):
-    one_hot_x = []
+def one_hot(x, feat):
+    feat_expand = []
+    x_expand = [[] for _ in range(x.shape[0])]
+    for j in range(x.shape[1]):
+        clss = list(set(x[:, j].astype(int)))
+        for cls in clss:
+            feat_expand.append(feat[j] + '-{}'.format(cls))
+        for i in range(x.shape[0]):
+            onehot = np.zeros(len(clss))
+            onehot[clss.index(int(x[i][j]))] = 1
+            x_expand[i].append(onehot)
     for i in range(x.shape[0]):
-        one_hot_x.append(np.eye(max_cls)[x[i].astype(int)].flatten())
-    return np.array(one_hot_x)
+        x_expand[i] = np.concatenate(x_expand[i], axis=0)
+    return np.array(x_expand), feat_expand
+
+def MIV(mlp, train_loader, feat_name, delta=0.1):
+    m = train_loader.dataset.data.shape[1] - 1
+    miv = torch.zeros(m)
+    for i in range(m):
+        yp, yn = 0, 0
+        for x, y in iter(train_loader):
+            xp, xn = copy.deepcopy(x), copy.deepcopy(x)
+            xp[:, i] *= 1 + delta
+            xn[:, i] *= 1 - delta
+            yp += mlp(xp).reshape(-1)
+            yn += mlp(xn).reshape(-1)
+        miv[i] = torch.mean(yp-yn)
+    miv = torch.abs(miv)
+    miv = miv / torch.sum(miv)
+    miv = dict(zip(feat_name, miv.tolist()))
+    miv = sorted(miv.items(), key=lambda x: x[1], reverse=True)
+    return miv
 
 def main():
     path = 'data.xlsx'
     data = pd.read_excel(path)
-    flag = [int('.f' in col_name) for col_name in data.columns][:-2]
+    flag = [int('.f' in col_name) for col_name in data.columns][:-1]
     is_discrete_feat = np.argwhere(np.array(flag) > 0).reshape(-1)
     is_continous_feat = np.argwhere(np.array(flag) == 0).reshape(-1)
+    continous_feat = list(data.columns[is_continous_feat])
+    discrete_feat = list(data.columns[is_discrete_feat])
     data = data.to_numpy().astype(np.float32)
-    x = data[:, :-2]
-    y_base = data[:, -2].reshape(-1,1)
+    x = data[:, :-1]
+    #y_base = data[:, -2].reshape(-1,1)
     y = data[:, -1].reshape(-1,1)
     x_con = x[:, is_continous_feat]
     x_dis = x[:, is_discrete_feat]
-    x_dis = one_hot(x_dis)
+
+    x_dis, discrete_feat = one_hot(x_dis, discrete_feat)
     x = np.concatenate([x_con, x_dis], axis=1)
+    feat_name = continous_feat + discrete_feat
     
     x = normalize(x)
-    data = np.concatenate([x,y_base,y], axis=1).astype(np.float32)
+    data = np.concatenate([x,y], axis=1).astype(np.float32)
     
     train_sample, test_sample = split(data, ratio=0.1)
     train_sample = torch.tensor(train_sample)
@@ -106,7 +138,7 @@ def main():
     test_dataset = MyDataset(test_sample)
     test_loader = DataLoader(test_dataset, batch_size=test_sample.shape[0], shuffle=True)
     
-    mlp = MLP(data.shape[1]-2, 10, 1)
+    mlp = MLP(data.shape[1]-1, 10, 1)
     optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
     
     for e in range(1000):
@@ -114,6 +146,8 @@ def main():
         if e % 10 == 0:
             print('*'*10 + 'test at epoch {}'.format(e) + '*'*10)
             test(mlp, test_loader)
+    
+    print(MIV(mlp, train_loader, feat_name))
     
 if __name__ == "__main__":
     main()
