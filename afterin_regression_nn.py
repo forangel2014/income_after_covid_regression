@@ -2,6 +2,7 @@ import torch
 import pandas as pd
 import numpy as np
 import copy
+import matplotlib.pyplot as plt
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
 
@@ -52,13 +53,15 @@ def split(x, ratio=0.1):
     return train_sample, test_sample
 
 def train(mlp, train_loader, optimizer):
+    losses = []
     for x, y in iter(train_loader):
         y_pred = mlp(x).reshape(-1)
         loss = torch.mean((y-y_pred)**2)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        #print(loss)
+        losses.append(loss.tolist())
+    return losses
 
 def test(mlp, test_loader):
     se = 0
@@ -106,6 +109,14 @@ def MIV(mlp, train_loader, feat_name, delta=0.1):
     miv = sorted(miv.items(), key=lambda x: x[1], reverse=True)
     return miv
 
+def plot(loss):
+    plt.figure()
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.plot(loss)
+    plt.show()
+    plt.savefig('train_loss.jpg')
+
 def main():
     path = 'data.xlsx'
     data = pd.read_excel(path)
@@ -141,12 +152,15 @@ def main():
     mlp = MLP(data.shape[1]-1, 10, 1)
     optimizer = torch.optim.Adam(mlp.parameters(), lr=1e-3)
     
+    train_loss = []
     for e in range(1000):
-        train(mlp, train_loader, optimizer)
+        loss = train(mlp, train_loader, optimizer)
+        train_loss.extend(loss)
         if e % 10 == 0:
             print('*'*10 + 'test at epoch {}'.format(e) + '*'*10)
             test(mlp, test_loader)
     
+    plot(train_loss)
     print(MIV(mlp, train_loader, feat_name))
     
 if __name__ == "__main__":
